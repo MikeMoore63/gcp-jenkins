@@ -16,13 +16,25 @@ jobs:
       - name: Set up Docker Compose
         uses: docker/setup-compose-action@v2
 
+      - name: Generate OIDC bootstrap test key
+        run: |
+          umask 077
+          openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 -out "$RUNNER_TEMP/oidc-test-key.pem"
+          printf 'OIDC_PRIVATE_KEY=%s\n' "$(openssl pkcs8 -topk8 -nocrypt -in "$RUNNER_TEMP/oidc-test-key.pem" -outform DER | base64 | tr -d '\n')" >> "$GITHUB_ENV"
+          printf 'OIDC_ISSUER_URL=https://issuer.example.test\n' >> "$GITHUB_ENV"
+          printf 'OIDC_EXPECTED_KEY_SHA256=%s\n' "$(openssl pkey -in "$RUNNER_TEMP/oidc-test-key.pem" -pubout -outform DER | sha256sum | cut -d' ' -f1)" >> "$GITHUB_ENV"
+
       - name: Run Docker Compose
-        run: docker compose up -d
+        run: docker compose up -d --build
 
       - name: Wait for Jenkins
         run: |
           sleep 60
           curl --retry 10 --retry-delay 5 --retry-connrefused http://localhost:2529
+
+      - name: Verify OIDC key injection
+        run: |
+          docker compose logs --no-color jenkins | grep -F "[OIDC-INIT] Saved credential 'jenkins-id-token' for issuer 'https://issuer.example.test' (public-key SHA-256 $OIDC_EXPECTED_KEY_SHA256)."
 
       # https://github.com/hashicorp/setup-terraform
       - uses: hashicorp/setup-terraform@v4

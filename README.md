@@ -53,6 +53,33 @@ podman-compose up -d
 
 Once the container is running, you can access the Jenkins web interface at [http://jenkins.localhost:2529](http://jenkins.localhost:2529).
 
+#### Test stable OIDC issuer and key injection
+
+The image includes a Jenkins post-initialization Groovy script that can replace the
+`jenkins-id-token` credential's signing key and issuer from environment variables.
+The private key must be Base64-encoded PKCS#8 DER containing an RSA CRT private key.
+For a local test, generate a key and start Jenkins with:
+
+```bash
+umask 077
+export OIDC_PRIVATE_KEY="$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | openssl pkcs8 -topk8 -nocrypt -outform DER | base64 | tr -d '\n')"
+export OIDC_ISSUER_URL="https://issuer.example.test"
+docker compose up -d --build
+```
+
+The init script logs the configured issuer and a SHA-256 fingerprint of the public
+key, but never logs the private key. The same key and issuer are reapplied on each
+Jenkins startup. Without both environment variables, the script leaves the
+JCasC-created credential unchanged.
+When setting an external issuer, publish the matching public key at that issuer's
+JWKS endpoint; the plugin intentionally omits credentials with an explicit issuer
+from Jenkins' own JWKS endpoint.
+
+> [!WARNING]
+> This environment-variable setup is intended for testing. Docker stores container
+> environment values in its metadata, so do not use it to pass production private
+> keys. Use a secrets manager or a protected mounted file for production deployments.
+
 ### 3. Configure Workload Identity Federation
 
 To allow Jenkins to securely authenticate with Google Cloud, you need to set up Workload Identity Federation. This involves creating a trust relationship between your Jenkins instance and your GCP project.
@@ -77,7 +104,7 @@ curl -o "jenkins-jwk.json" \
 ```
 
 > [!IMPORTANT]
-> To prevent a new key from being generated each time the container is restarted, you must now rename the `jcasc/credentials.yml` file to `jcasc/credentials.yml.NOT-ACTIVE`. This ensures that the same key is used across restarts, maintaining the trust relationship with GCP.
+> If you are not using key injection, rename `jcasc/credentials.yml` to `jcasc/credentials.yml.NOT-ACTIVE` after the first boot to preserve the generated credential in Jenkins' credentials store. When key injection is enabled, the init script reapplies the supplied key and issuer on every startup.
 
 #### Create your Workload Identity Pool and Provider
 
