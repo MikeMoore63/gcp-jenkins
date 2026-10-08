@@ -56,29 +56,62 @@ Once the container is running, you can access the Jenkins web interface at [http
 #### Test stable OIDC issuer and key injection
 
 The image includes a Jenkins post-initialization Groovy script that can replace the
-`jenkins-id-token` credential's signing key and issuer from environment variables.
-The private key must be Base64-encoded PKCS#8 DER containing an RSA CRT private key.
-For a local test, generate a key and start Jenkins with:
+`jenkins-id-token` credential's signing key and issuer. For illustration, the local
+test below passes the private key in an environment variable because that keeps the
+example self-contained:
 
 ```bash
-umask 077
 export OIDC_PRIVATE_KEY="$(openssl genpkey -algorithm RSA -pkeyopt rsa_keygen_bits:2048 | openssl pkcs8 -topk8 -nocrypt -outform DER | base64 | tr -d '\n')"
 export OIDC_ISSUER_URL="https://issuer.example.test"
 docker compose up -d --build
 ```
 
-The init script logs the configured issuer and a SHA-256 fingerprint of the public
-key, but never logs the private key. The same key and issuer are reapplied on each
-Jenkins startup. Without both environment variables, the script leaves the
-JCasC-created credential unchanged.
+**Do not use `OIDC_PRIVATE_KEY` for production secrets.** Environment values can be
+exposed through container metadata, process inspection, diagnostics, or deployment
+tools. Prefer having a secrets manager (for example, a Secrets Store CSI Driver)
+materialize the key as a file and mount that file read-only into the Jenkins
+container. Set `OIDC_PRIVATE_KEY_FILE` to the path as seen inside the container,
+and set `OIDC_ISSUER_URL` as usual. For example, if the secret is mounted at
+`/run/secrets/oidc-private-key.b64`, a Docker Compose override for a key file
+already available on the host could add this read-only mount:
+
+```yaml
+services:
+  jenkins:
+    volumes:
+      - type: bind
+        source: ${OIDC_PRIVATE_KEY_HOST_PATH:?Set this to the host secret-file path}
+        target: /run/secrets/oidc-private-key.b64
+        read_only: true
+```
+
+In a Kubernetes deployment, configure the CSI volume mount to use the same
+container path instead. Then set the path and issuer:
+
+```bash
+export OIDC_PRIVATE_KEY_FILE="/run/secrets/oidc-private-key.b64"
+export OIDC_ISSUER_URL="https://issuer.example.test"
+docker compose up -d --build
+```
+
+Configure the deployment to mount the secret file at that container path with
+read-only access; do not put the key contents in Compose configuration. The file
+must contain the private key as Base64-encoded PKCS#8 DER for an RSA CRT key
+(whitespace/newlines are ignored). Restrict access to the secret at its source and
+ensure it is readable by the Jenkins process. The init script reads the file,
+stores the key in Jenkins' encrypted credentials store, and logs the configured
+issuer and a SHA-256 public-key fingerprint, never the private key. The same key
+and issuer are reapplied on each Jenkins startup. With no key and issuer settings,
+the script leaves the JCasC-created credential unchanged.
+
 When setting an external issuer, publish the matching public key at that issuer's
 JWKS endpoint; the plugin intentionally omits credentials with an explicit issuer
 from Jenkins' own JWKS endpoint.
 
 > [!WARNING]
-> This environment-variable setup is intended for testing. Docker stores container
-> environment values in its metadata, so do not use it to pass production private
-> keys. Use a secrets manager or a protected mounted file for production deployments.
+> The file-based approach avoids placing the private key in container environment
+> metadata, but the key is still present in Jenkins' credentials store after startup.
+> Protect the mounted file, Jenkins home, and access to the Jenkins controller.
 
 ### 3. Configure Workload Identity Federation
 

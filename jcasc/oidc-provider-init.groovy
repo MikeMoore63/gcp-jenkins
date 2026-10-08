@@ -13,17 +13,25 @@ import java.security.spec.PKCS8EncodedKeySpec
 import java.security.spec.RSAPublicKeySpec
 import java.util.Base64
 
-def privateKeyText = System.getenv('OIDC_PRIVATE_KEY')?.replaceAll('\\s', '')
+def privateKeyFile = System.getenv('OIDC_PRIVATE_KEY_FILE')?.trim()
+def privateKeyEnv = System.getenv('OIDC_PRIVATE_KEY')?.trim()
 def issuerUrl = System.getenv('OIDC_ISSUER_URL')?.trim()
 
-if (!privateKeyText && !issuerUrl) {
+if (privateKeyFile && privateKeyEnv) {
+    throw new IllegalStateException('Set only one of OIDC_PRIVATE_KEY_FILE or OIDC_PRIVATE_KEY.')
+}
+if (!privateKeyFile && !privateKeyEnv && !issuerUrl) {
     println '[OIDC-INIT] Key injection is disabled; leaving the configured credential unchanged.'
     return
 }
-if (!privateKeyText || !issuerUrl) {
-    throw new IllegalStateException('Set both OIDC_PRIVATE_KEY and OIDC_ISSUER_URL to inject the OIDC credential.')
+if ((!privateKeyFile && !privateKeyEnv) || !issuerUrl) {
+    throw new IllegalStateException('Set OIDC_ISSUER_URL and either OIDC_PRIVATE_KEY_FILE or OIDC_PRIVATE_KEY to inject the OIDC credential.')
 }
 
+def privateKeyText = privateKeyFile ?
+    java.nio.file.Files.readString(java.nio.file.Path.of(privateKeyFile)) :
+    privateKeyEnv
+privateKeyText = privateKeyText.replaceAll('\\s', '')
 def privateKeyBytes = Base64.decoder.decode(privateKeyText)
 def keyFactory = KeyFactory.getInstance('RSA')
 def privateKey = keyFactory.generatePrivate(new PKCS8EncodedKeySpec(privateKeyBytes))

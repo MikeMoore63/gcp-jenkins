@@ -10,6 +10,7 @@ services:
     environment:
       - CASC_JENKINS_CONFIG=/var/jenkins_home/jcasc-config-files/
       - OIDC_ISSUER_URL=${OIDC_ISSUER_URL:-}
+      - OIDC_PRIVATE_KEY_FILE=${OIDC_PRIVATE_KEY_FILE:-}
       - OIDC_PRIVATE_KEY=${OIDC_PRIVATE_KEY:-}
 volumes:
   jenkins_home:
